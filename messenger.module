@@ -1,0 +1,837 @@
+<?php
+
+define("MESSENGER_SECRET", 'messenger_secret');
+define("MESSENGER_URL", 'messenger_url');
+define('MESSENGER_OFFSET', 300);
+define('SIDEBAR_OFFSET', 93);
+define('GIPHY_API', 'messenger_giphy');
+define('DEFAULT_GIPHY_API', 'bqJL2F4KOX6nKrT1XDgUdTMuJtztcwwz');
+define('GIPHY_EXCLUDE_KEYWORD', 'giphy_exclude_keyword');
+/**
+ * Implements hook_block_info()
+ */
+function messenger_block_info()
+{
+
+  $blocks['messenger_inbox'] = array(
+    'info' => t('Messenger Inbox'),
+    'cache' => DRUPAL_NO_CACHE
+  );
+  $blocks['messenger_sidebar'] = array(
+    'info' => t('Messenger Sidebar'),
+    'cache' => DRUPAL_NO_CACHE
+  );
+
+
+  return $blocks;
+}
+
+
+/**
+ * Implements hook_theme()
+ */
+function messenger_theme($existing, $type, $theme, $path)
+{
+  return array(
+    'messenger_messages' => array(
+      'variables' => array('store' => NULL),
+      'template' => 'messenger-messages'
+    ),
+    'messenger_sidebar' => array(
+      'variables' => array('store' => NULL),
+      'template' => 'messenger-sidebar'
+    ),
+
+  );
+}
+
+
+function _messenger_get_settings()
+{
+  $store = messenger_create_store();
+
+  $settings = new stdClass();
+  $settings->theme = array('offset' => MESSENGER_OFFSET, 'sidebarOffset' => SIDEBAR_OFFSET);
+  $settings->account = $store;
+  $settings->giphy = messenger_get_giphy_settings();
+
+  return $settings;
+}
+
+/**
+ * Implements hook_block_view()
+ */
+function messenger_block_view($delta = '')
+{
+
+
+  $block = array();
+
+  $isInbox = false;
+
+  if (arg(0) == 'member' && arg(1) == 'messages') {
+    $isInbox = true;
+  }
+
+  switch ($delta) {
+    case 'messenger_inbox':
+
+      if ($isInbox) {
+        $settings = _messenger_get_settings();
+
+        $block['subject'] = null;
+
+
+        $block['content'] = array(
+          '#theme' => 'messenger_messages',
+          "#store" => drupal_json_encode($settings),
+          '#attached' => array('library' => array(
+            array('messenger', 'library-messenger')
+          ))
+        );
+      }
+
+
+      break;
+
+
+    case 'messenger_sidebar':
+
+      if (!$isInbox) {
+        $settings = _messenger_get_settings();
+
+        $block['subject'] = null;
+
+
+        $block['content'] = array(
+          '#theme' => 'messenger_sidebar',
+          "#store" => drupal_json_encode($settings),
+          '#attached' => array('library' => array(
+            array('messenger', 'library-messenger')
+          ))
+        );
+      }
+      break;
+
+
+  }
+
+  return $block;
+}
+
+/**
+ * Implements hook_library()
+ */
+function messenger_library()
+{
+  $libraries['library-messenger'] = array(
+    'title' => 'Messenger',
+    'website' => '',
+    'version' => '1.0',
+    'js' => array(
+      drupal_get_path('module', 'messenger') . '/build/js/main.js' => array(
+        'scope' => 'footer',
+      ),
+    ),
+    'css' => array(
+      drupal_get_path('module', 'messenger') . '/build/css/main.css' => array(
+        'type' => 'file',
+        'media' => 'screen',
+      ),
+    ),
+  );
+  return $libraries;
+}
+
+
+/**
+ * Implements hook_init()
+ */
+function messenger_init()
+{
+
+
+  messenger_create_store();
+
+}
+
+
+/**
+ * Create default store
+ */
+
+function messenger_create_store()
+{
+  global $user;
+
+  $token = NULL;
+  if ($user->uid) {
+    $token = messenger_get_token($user);
+    if (empty($token)) {
+      // let create token
+      $token = messenger_auth_token($user);
+    }
+
+  }
+
+  return $token;
+}
+
+function messenger_get_giphy_settings()
+{
+  $word_arr = preg_split("/\r\n|\n|\r/", variable_get(GIPHY_EXCLUDE_KEYWORD, ''));
+  $giphy = new stdClass();
+  $api = variable_get(GIPHY_API);
+  $giphy->api = !empty($api) ? $api : DEFAULT_GIPHY_API;
+  $giphy->exclude = $word_arr;
+
+  return $giphy;
+}
+
+/**
+ * Get token
+ * @param $user
+ * @return mixed
+ */
+function messenger_get_token($user)
+{
+
+
+  $result = db_select('messenger_token', 'c')
+    ->fields('c', array('data'))
+    ->condition('uid', $user->uid, '=')
+    ->execute()
+    ->fetchField();
+
+  if (!empty($result)) {
+    $result = unserialize($result);
+  }
+  return $result;
+
+}
+
+/**
+ * Auth user return user and token, if user not found will create new user.
+ * @param $user
+ * @return null
+ * @throws Exception
+ */
+function messenger_auth_token($user)
+{
+
+
+  $data = messenger_prepare_user($user);
+
+  $userId = $data->uid;
+  $firstName = $data->firstName;
+  $lastName = $data->lastName;
+  $avatar = $data->avatar;
+  $email = $data->email;
+
+  $query = <<<"JSON"
+ mutation requestUserToken {
+  requestUserToken(uid: ${userId} , first_name: "${firstName}", avatar: "${avatar}", last_name: "${lastName}", email: "${email}", password: "") {
+    id
+    token
+    user_id
+    created
+    user {
+      status
+      id
+      uid
+      first_name
+      email
+      last_name
+    }
+  }
+
+}
+JSON;
+
+
+  $result = messenger_call_api($query);
+
+
+  if (isset($result->requestUserToken)) {
+
+    // let update to database
+
+    $token = $result->requestUserToken;
+
+    db_insert('messenger_token')
+      ->fields(array(
+        'uid' => $user->uid,
+        'data' => serialize($token),
+        'created' => REQUEST_TIME,
+      ))->execute();
+
+    return $token;
+  } else {
+    drupal_set_message(t('An error authentication user'), 'error');
+  }
+  return NULL;
+
+}
+
+/**
+ * Prepare data of user to send to api
+ * @param $user
+ * @param $encode
+ * @return stdClass
+ */
+function messenger_prepare_user($user, $encode = FALSE, $reload = TRUE)
+{
+
+
+  if ($reload) {
+    $user = user_load($user->uid);
+  }
+  $firstName = !empty($user->field_user_name[LANGUAGE_NONE][0]['value']) ? $user->field_user_name[LANGUAGE_NONE][0]['value'] : $user->name;
+  $lastName = !empty($user->field_last_name[LANGUAGE_NONE][0]['value']) ? $user->field_last_name[LANGUAGE_NONE][0]['value'] : "";
+  $data = new stdClass();
+  $data->email = $user->mail;
+  $data->uid = $user->uid;
+  $data->firstName = $firstName; // Handle First name later
+  $data->lastName = $lastName;
+  $data->location = !empty($user->field_user_location[LANGUAGE_NONE][0]['value']) ? $user->field_user_location[LANGUAGE_NONE][0]['value'] : "";
+  $data->work = !empty($user->field_user_work[LANGUAGE_NONE][0]['value']) ? $user->field_user_work[LANGUAGE_NONE][0]['value'] : "";
+  $data->school = !empty($user->field_user_school[LANGUAGE_NONE][0]['value']) ? $user->field_user_school[LANGUAGE_NONE][0]['value'] : "";
+  $data->about = !empty($user->field_user_about[LANGUAGE_NONE][0]['value']) ? $user->field_user_about[LANGUAGE_NONE][0]['value'] : "";
+  $data->avatar = messenger_load_profile_picture_url($user);
+
+  return $encode ? json_encode($data, JSON_NUMERIC_CHECK) : $data;
+}
+
+/**
+ * Handle update user to api
+ * @param $user
+ */
+function messenger_update_user($user)
+{
+  $data = messenger_prepare_user($user, false, false);
+
+
+  $userId = $data->uid;
+  $firstName = $data->firstName;
+  $lastName = $data->lastName;
+  $avatar = $data->avatar;
+  $email = $data->email;
+
+
+  $query = <<<"JSON"
+mutation createOrUpdateUser {
+  createOrUpdateUser(uid: ${userId}, first_name: "${firstName}", avatar: "${avatar}", last_name: "${lastName}", email: "${email}", password: "") {
+    id
+    uid
+    avatar
+    first_name
+    email
+    last_name
+  }
+}
+
+JSON;
+
+  $result = messenger_call_api($query);
+
+  if (!isset($result->createOrUpdateUser)) {
+    drupal_set_message("An error updating user to api" . json_encode($result), 'error');
+    return NULL;
+  }
+
+  return $result->createOrUpdateUser;
+}
+
+
+function _messenger_add_friend($user, $friend)
+{
+
+  $friend_user = $friend;
+  $data = messenger_prepare_user($user, false, false);
+  $friendData = messenger_prepare_user($friend_user, false, false);
+
+  $arguments = array(
+    ":uid" => $data->uid,
+    ":firstName" => $data->firstName,
+    ":lastName" => $data->lastName,
+    ":email" => $data->email,
+    ":avatar" => $data->avatar,
+    ":friendUserId" => $friendData->uid,
+    ":friendAvatar" => $friendData->avatar,
+    ":friendFirstName" => $friendData->firstName,
+    ":friendLastName" => $friendData->lastName,
+    ":friendEmail" => $friendData->email,
+  );
+
+
+  $query = <<<'JSON'
+mutation createOrUpdateUser {
+    user: createOrUpdateUser(uid: :uid, first_name: ":firstName", avatar: ":avatar", last_name: ":lastName", email: ":email", password: "") {
+      id
+      uid
+      avatar
+      first_name
+      email
+      last_name
+    }
+  
+   friend: createOrUpdateUser(uid: :friendUserId, first_name: ":friendFirstName", avatar: ":friendAvatar", last_name: ":friendLastName", email: ":friendEmail", password: "") {
+      id
+      uid
+      avatar
+      first_name
+      email
+      last_name
+    }
+  
+  
+}
+
+
+
+JSON;
+
+
+  $query = messenger_query($query, $arguments);
+
+  $result = messenger_call_api($query);
+
+  if (isset($result->user) && isset($result->friend)) {
+
+    $userId = $result->user->id;
+    $friendId = $result->friend->id;
+
+    // request add friend
+
+    $q = <<<'JSON'
+mutation addFriend {
+  addFriend(user: :userId, friend: :friendId)
+}
+JSON;
+
+
+    $q = messenger_query($q, array(":userId" => $userId, ":friendId" => $friendId));
+    $r = messenger_call_api($q);
+
+    if (isset($r->addFriend)) {
+      return TRUE;
+    }
+
+
+  }
+
+
+  return NULL;
+}
+
+
+/**
+ * Add friend
+ */
+
+function messenger_add_friend($uid)
+{
+
+  global $user;
+
+  $friend = user_load($uid);
+  return _messenger_add_friend($user, $friend);
+
+
+}
+
+function messenger_query($q, $arguments)
+{
+  foreach ($arguments as $k => $v) {
+
+    if (empty($v)) {
+      $v = "";
+    }
+    $q = str_replace($k, $v, $q);
+  }
+
+  return $q;
+}
+
+/**
+ * Create friendship
+ * @param $userId
+ * @param $friendId
+ * @return null
+ */
+function messenger_create_friendship($userId, $friendId)
+{
+
+  $user = user_load($userId);
+  $friend = user_load($friendId);
+
+  return _messenger_add_friend($user, $friend);
+
+}
+
+/**
+ * Delete a friendship
+ * @param $userId
+ * @param $friendId
+ * @return bool
+ */
+function messenger_delete_friendship($userId, $friendId)
+{
+
+  $user = user_load($userId);
+  $friend_user = user_load($friendId);
+
+  $data = messenger_prepare_user($user, false, false);
+  $friendData = messenger_prepare_user($friend_user, false, false);
+
+  $arguments = array(
+    ":uid" => $data->uid,
+    ":firstName" => $data->firstName,
+    ":lastName" => $data->lastName,
+    ":email" => $data->email,
+    ":avatar" => $data->avatar,
+    ":friendUserId" => $friendData->uid,
+    ":friendAvatar" => $friendData->avatar,
+    ":friendFirstName" => $friendData->firstName,
+    ":friendLastName" => $friendData->lastName,
+    ":friendEmail" => $friendData->email,
+  );
+
+
+  $query = <<<'JSON'
+mutation createOrUpdateUser {
+    user: createOrUpdateUser(uid: :uid, first_name: ":firstName", avatar: ":avatar", last_name: ":lastName", email: ":email", password: "") {
+      id
+      uid
+      avatar
+      first_name
+      email
+      last_name
+    }
+  
+   friend: createOrUpdateUser(uid: :friendUserId, first_name: ":friendFirstName", avatar: ":friendAvatar", last_name: ":friendLastName", email: ":friendEmail", password: "") {
+      id
+      uid
+      avatar
+      first_name
+      email
+      last_name
+    }
+  
+  
+}
+
+
+
+JSON;
+
+
+  $query = messenger_query($query, $arguments);
+
+  $result = messenger_call_api($query);
+
+  if (isset($result->user) && isset($result->friend)) {
+
+    $userId = $result->user->id;
+    $friendId = $result->friend->id;
+
+    // request add friend
+
+    $q = <<<'JSON'
+mutation unFriend {
+  unFriend(user: :userId, friend: :friendId)
+}
+JSON;
+
+
+    $q = messenger_query($q, array(":userId" => $userId, ":friendId" => $friendId));
+    $r = messenger_call_api($q);
+
+    if (isset($r->addFriend)) {
+      return TRUE;
+    }
+
+
+  }
+
+
+  return NULL;
+
+}
+
+/** Get user status and unread message count
+ * @param $uid
+ * @return null
+ */
+function messenger_get_user_status($uid)
+{
+
+  $q = <<< 'JSON'
+query user{
+  
+  user(uid::id){
+    status,
+  }
+}
+JSON;
+
+  $q = messenger_query($q, array(":id" => $uid));
+  $result = messenger_call_api($q);
+
+  if (isset($result->user)) {
+    return $result->user->status;
+  }
+
+  return NULL;
+}
+
+
+/**
+ * Get user profile image url
+ * @param $user
+ * @return bool|string
+ */
+function messenger_load_profile_picture_url($user)
+{
+
+
+  if (variable_get('user_pictures', 0)) {
+    if (!empty($user->picture)) {
+
+      if (is_numeric($user->picture)) {
+        $user->picture = file_load($user->picture);
+      }
+
+      if (!empty($user->picture->uri)) {
+        $filepath = $user->picture->uri;
+      }
+    } elseif (variable_get('user_picture_default', '')) {
+      // Use default user profile picture if the user hasn't provided one
+      $filepath = variable_get('user_picture_default', '');
+    }
+    if (isset($filepath)) {
+      $profile_url = file_create_url($filepath);
+    }
+  }
+
+  return isset($profile_url) ? $profile_url : "";
+}
+
+
+/**
+ * Implements hook_menu()
+ * @return mixed
+ */
+
+function messenger_menu()
+{
+  $items['admin/config/system/messenger'] = array(
+    'title' => 'Messenger configuration',
+    'page callback' => 'drupal_get_form',
+    'access arguments' => array('access messenger config'),
+    'page arguments' => array('messenger_config_form'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'messenger.pages.inc'
+  );
+  $items['member/messages'] = array(
+    'title' => 'Messages',
+    'page callback' => 'messenger_messages_page',
+    'access arguments' => array('access content'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'messenger.pages.inc'
+  );
+  $items['user/messages/%'] = array(
+    'title' => 'Messages',
+    'page callback' => 'messenger_messages_page',
+    'access arguments' => array('access content'),
+    'page arguments' => array(1),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'messenger.pages.inc'
+  );
+
+  $items['messenger/user/%'] = array(
+    'title' => 'Get user info',
+    'page callback' => 'messenger_find_user_or_create',
+    'access arguments' => array('access user profiles'),
+    'page arguments' => array(2),
+    'type' => MENU_CALLBACK,
+    'file' => 'messenger.pages.inc'
+  );
+
+  return $items;
+}
+
+
+/**
+ * Implements hook_user_logout
+ * @param $account
+ */
+
+function messenger_user_logout($account)
+{
+
+  messenger_logout_user($account);
+}
+
+/**
+ * Logout user to api
+ * @param $user
+ */
+function messenger_logout_user($user)
+{
+
+  $token = messenger_get_token($user);
+
+
+  if (!empty($token)) {
+    if (isset($token->token)) {
+
+      $tokenId = $token->token;
+
+      db_delete('messenger_token')
+        ->condition('uid', $user->uid)
+        ->execute();
+
+
+      $q = <<<'JSON'
+mutation logout{
+  
+  logout(token: ":token") 
+}
+
+JSON;
+      $q = messenger_query($q, array(":token" => $tokenId));
+
+      messenger_call_api($q);
+
+
+    }
+  }
+}
+
+/**
+ *
+ * Implements of hook_user_delete
+ * @param $account
+ */
+function messenger_user_delete($account)
+{
+  db_delete('messenger_token')
+    ->condition('uid', $account->uid)
+    ->execute();
+
+
+  $q = <<<'JSON'
+mutation deleteUser{
+  
+  deleteUser(id: 0, uid: :uid)
+}
+
+JSON;
+  $q = messenger_query($q, array(":uid" => $account->uid));
+
+  messenger_call_api($q);
+
+}
+
+/**
+ * Impelemnts hook_user_insert
+ * @param $edit
+ * @param $account
+ * @param $category
+ * @throws Exception
+ */
+function messenger_user_insert(&$edit, $account, $category)
+{
+
+  $user = user_load($account->uid);
+
+  messenger_update_user($user);
+
+}
+
+/**
+ * Find or create user
+ * @param $user
+ */
+function messenger_find_or_create_user($user)
+{
+
+  messenger_update_user($user);
+}
+
+/**
+ * Implements hook_user_update()
+ * @param $edit
+ * @param $account
+ * @param $category
+ */
+function messenger_user_update(&$edit, $account, $category)
+{
+
+  messenger_update_user($account);
+}
+
+/**
+ * Implements hook_permission()
+ * @return array
+ */
+function messenger_permission()
+{
+  return array(
+    'access messenger config' => array(
+      'title' => t('access messenger config'),
+      'description' => t('Perform messenger configuration'),
+    ),
+  );
+}
+
+
+/**
+ * @param $haystack
+ * @param $needle
+ * @return boolChec
+ */
+function _messenger_url_endsWith($haystack, $needle)
+{
+  return $needle === "" || (($temp = strlen($haystack) - strlen($needle)) >= 0 && strpos($haystack, $needle, $temp) !== false);
+}
+
+
+function messenger_call_api($q)
+{
+
+  $url = variable_get(MESSENGER_URL);
+  $secret = variable_get(MESSENGER_SECRET);
+
+  $options = array(
+    'method' => 'POST',
+    'headers' => array('Content-Type' => 'application/json; charset=UTF-8'),
+  );
+
+  $query['auth'] = $secret;
+
+  $body = new stdClass();
+  $body->query = $q;
+  $body->variable = "";
+
+  $options['data'] = json_encode($body);
+
+
+  $params = http_build_query($query);
+  $result = drupal_http_request($url . '?' . $params, $options);
+
+
+  return messenger_request_response($result);
+}
+
+function messenger_request_response($result)
+{
+  $data = json_decode($result->data);
+
+
+  if (isset($data->errors)) {
+    return NULL;
+  }
+  return $data->data;
+}

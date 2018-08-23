@@ -1,0 +1,35 @@
+<?php
+
+/**
+ *Implement of hook_schema
+ */
+function messenger_schema()
+{
+    $schema['messenger_token'] = array(
+        // Example (partial) specification for table "node".
+        'description' => 'Messenger table',
+        'fields' => array(
+            'id' => array(
+                'description' => 'The primary identifier for a table.',
+                'type' => 'serial',
+                'unsigned' => TRUE,
+                'not null' => TRUE,
+            ),
+            'uid' => array(
+                'description' => 'User Id',
+                'type' => 'int',
+                'not null' => TRUE,
+                'default' => 0,
+            ),
+            'data' => array(
+                'description' => 'The title of this node, always treated as non-markup plain text.',
+                'type' => 'text',
+                'size' => 'big',
+                'not null' => FALSE
+            ),
+            'created' => array('type' => 'int', 'not null' => TRUE, 'default' => 0),
+        ),
+        'primary key' => array('id'),
+    );
+    return $schema;
+}

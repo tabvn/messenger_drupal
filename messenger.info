@@ -1,0 +1,4 @@
+name = Messenger
+description = Messenger Integation.
+core = 7.x
+configure = admin/config/system/messenger
