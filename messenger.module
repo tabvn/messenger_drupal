@@ -325,8 +325,10 @@ mutation createOrUpdateUser {
     uid
     avatar
     first_name
-    email
     last_name
+    email
+    status
+    created
   }
 }
 
@@ -757,7 +759,7 @@ function messenger_user_insert(&$edit, $account, $category)
 function messenger_find_or_create_user($user)
 {
 
-  messenger_update_user($user);
+  return messenger_update_user($user);
 }
 
 /**
