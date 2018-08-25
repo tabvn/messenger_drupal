@@ -2,7 +2,7 @@
 
 define("MESSENGER_SECRET", 'messenger_secret');
 define("MESSENGER_URL", 'messenger_url');
-define('MESSENGER_OFFSET', 300);
+define('MESSENGER_OFFSET', 'messenger_offset');
 define('SIDEBAR_OFFSET', 93);
 define('GIPHY_API', 'messenger_giphy');
 define('DEFAULT_GIPHY_API', 'bqJL2F4KOX6nKrT1XDgUdTMuJtztcwwz');
@@ -13,11 +13,11 @@ define('GIPHY_EXCLUDE_KEYWORD', 'giphy_exclude_keyword');
 function messenger_block_info()
 {
 
-  $blocks['messenger_inbox'] = array(
+  $blocks['messenger_ar_inbox'] = array(
     'info' => t('Messenger Inbox'),
     'cache' => DRUPAL_NO_CACHE
   );
-  $blocks['messenger_sidebar'] = array(
+  $blocks['messenger_ar_sidebar'] = array(
     'info' => t('Messenger Sidebar'),
     'cache' => DRUPAL_NO_CACHE
   );
@@ -33,9 +33,9 @@ function messenger_block_info()
 function messenger_theme($existing, $type, $theme, $path)
 {
   return array(
-    'messenger_messages' => array(
+    'messenger_inbox' => array(
       'variables' => array('store' => NULL),
-      'template' => 'messenger-messages'
+      'template' => 'messenger-inbox'
     ),
     'messenger_sidebar' => array(
       'variables' => array('store' => NULL),
@@ -51,7 +51,7 @@ function _messenger_get_settings()
   $store = messenger_create_store();
 
   $settings = new stdClass();
-  $settings->theme = array('offset' => MESSENGER_OFFSET, 'sidebarOffset' => SIDEBAR_OFFSET);
+  $settings->theme = array('offset' => variable_get(MESSENGER_OFFSET, 300), 'sidebarOffset' => SIDEBAR_OFFSET);
   $settings->account = $store;
   $settings->giphy = messenger_get_giphy_settings();
 
@@ -69,12 +69,13 @@ function messenger_block_view($delta = '')
 
   $isInbox = false;
 
-  if (arg(0) == 'member' && arg(1) == 'messages') {
+  if (arg(0) == 'user' && arg(1) == 'messages') {
     $isInbox = true;
   }
 
+
   switch ($delta) {
-    case 'messenger_inbox':
+    case 'messenger_ar_inbox':
 
       if ($isInbox) {
         $settings = _messenger_get_settings();
@@ -83,7 +84,7 @@ function messenger_block_view($delta = '')
 
 
         $block['content'] = array(
-          '#theme' => 'messenger_messages',
+          '#theme' => 'messenger_inbox',
           "#store" => drupal_json_encode($settings),
           '#attached' => array('library' => array(
             array('messenger', 'library-messenger')
@@ -95,7 +96,7 @@ function messenger_block_view($delta = '')
       break;
 
 
-    case 'messenger_sidebar':
+    case 'messenger_ar_sidebar':
 
       if (!$isInbox) {
         $settings = _messenger_get_settings();

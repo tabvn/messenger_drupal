@@ -41,6 +41,14 @@ function messenger_config_form($form, &$form_state)
     '#required' => FALSE,
   );
 
+  //MESSENGER_OFFSET
+  $form[MESSENGER_OFFSET] = array(
+    '#type' => 'textfield',
+    '#title' => t('Inbox Offset Height'),
+    '#default_value' => variable_get(MESSENGER_OFFSET, 300),
+    '#description' => t('Use offset to calculate height of inbox'),
+    '#required' => FALSE,
+  );
 
   return system_settings_form($form);
 
